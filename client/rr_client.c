@@ -15,7 +15,7 @@ SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 Contributors:
    Roger Light - initial implementation and documentation.
 */
-
+#define VERSION "1.0.0"
 #include "config.h"
 
 #include <assert.h>

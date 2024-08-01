@@ -47,6 +47,23 @@ Contributors:
 #define PORT_UNDEFINED -1
 #define PORT_UNIX 0
 
+// Definizioni di stato
+#define STATUS_CONNECTING 1
+#define STATUS_CONNECTED 2
+#define STATUS_DISCONNECTED 3
+
+// Variabile globale di stato
+extern int status;
+
+#ifndef MOSQ_OPT_TCP_NODELAY
+#define MOSQ_OPT_TCP_NODELAY 4  // Definizione dell'opzione TCP_NODELAY
+#endif
+
+
+#ifndef MOSQ_ERR_TIMEOUT
+#define MOSQ_ERR_TIMEOUT 7  // Definizione dell'errore di timeout
+#endif
+
 struct mosq_config {
 	char *id;
 	char *id_prefix;

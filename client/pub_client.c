@@ -15,7 +15,8 @@ SPDX-License-Identifier: EPL-2.0 OR BSD-3-Clause
 Contributors:
    Roger Light - initial implementation and documentation.
 */
-
+#define VERSION "1.0.0"
+#include <gtk/gtk.h>
 #include "config.h"
 
 #include <errno.h>
@@ -26,6 +27,7 @@ Contributors:
 #ifndef WIN32
 #include <sys/time.h>
 #include <time.h>
+
 #else
 #include <process.h>
 #include <winsock2.h>
@@ -34,8 +36,9 @@ Contributors:
 
 #include <mqtt_protocol.h>
 #include <mosquitto.h>
-#include "client_shared.h"
+
 #include "pub_shared.h"
+#include "client_shared.h"
 
 /* Global variables for use in callbacks. See sub_client.c for an example of
  * using a struct to hold variables for use in callbacks. */
@@ -47,8 +50,25 @@ static int line_buf_len = 1024;
 static bool disconnect_sent = false;
 static int publish_count = 0;
 static bool ready_for_repeat = false;
-static volatile int status = STATUS_CONNECTING;
 static int connack_result = 0;
+
+
+//new
+struct mosq_config cfg;
+bool process_messages = true;
+int msg_count = 0;
+struct mosquitto *mosq = NULL;  // Dichiarazione della variabile globale
+
+static bool timed_out = false;
+ 
+GtkWidget *broker_entry;
+GtkWidget *topic_entry;
+GtkWidget *message_entry;
+
+
+
+void activate(GtkApplication *app, gpointer user_data);
+
 
 #ifdef WIN32
 static uint64_t next_publish_tv;
@@ -473,7 +493,7 @@ static void print_usage(void)
 	printf(" --quiet : don't print error messages.\n");
 	printf(" --repeat : if publish mode is -f, -m, or -s, then repeat the publish N times.\n");
 	printf(" --repeat-delay : if using --repeat, wait time seconds between publishes. Defaults to 0.\n");
-	printf(" --unix : connect to a broker through a unix domain socket instead of a TCP socket,\n");
+	printf(" --unix : connect to a broker through a unix do socket instead of a TCP socket,\n");
 	printf("          e.g. /tmp/mosquitto.sock\n");
 	printf(" --will-payload : payload for the client Will, which is sent by the broker in case of\n");
 	printf("                  unexpected disconnection. If not given and will-topic is set, a zero\n");
@@ -512,109 +532,137 @@ static void print_usage(void)
 	printf("\nSee https://mosquitto.org/ for more information.\n\n");
 }
 
-int main(int argc, char *argv[])
-{
-	struct mosquitto *mosq = NULL;
-	int rc;
+int main(int argc, char *argv[]) {
+    struct mosquitto *mosq = NULL;
+    int rc;
+    GtkApplication *app;
+    int status;
 
-	mosquitto_lib_init();
+    mosquitto_lib_init();
 
-	if(pub_shared_init()) return 1;
+    if (pub_shared_init()) return 1;
 
-	rc = client_config_load(&cfg, CLIENT_PUB, argc, argv);
-	if(rc){
-		if(rc == 2){
-			/* --help */
-			print_usage();
-		}else if(rc == 3){
-			print_version();
-		}else{
-			fprintf(stderr, "\nUse 'mosquitto_pub --help' to see usage.\n");
-		}
-		goto cleanup;
-	}
+    rc = client_config_load(&cfg, CLIENT_PUB, argc, argv);
+    if (rc) {
+        if (rc == 2) {
+            /* --help */
+            print_usage();
+        } else if (rc == 3) {
+            print_version();
+        } else {
+            fprintf(stderr, "\nUse 'mosquitto_pub --help' to see usage.\n");
+        }
+        goto cleanup;
+    }
 
-#ifndef WITH_THREADING
-	if(cfg.pub_mode == MSGMODE_STDIN_LINE){
-		fprintf(stderr, "Error: '-l' mode not available, threading support has not been compiled in.\n");
-		goto cleanup;
-	}
-#endif
+    if (client_id_generate(&cfg)) {
+        goto cleanup;
+    }
 
-	if(cfg.pub_mode == MSGMODE_STDIN_FILE){
-		if(load_stdin()){
-			err_printf(&cfg, "Error loading input from stdin.\n");
-			goto cleanup;
-		}
-	}else if(cfg.file_input){
-		if(load_file(cfg.file_input)){
-			err_printf(&cfg, "Error loading input file \"%s\".\n", cfg.file_input);
-			goto cleanup;
-		}
-	}
+    mosq = mosquitto_new(cfg.id, cfg.clean_session, NULL);
+    if (!mosq) {
+        switch (errno) {
+            case ENOMEM:
+                err_printf(&cfg, "Error: Out of memory.\n");
+                break;
+            case EINVAL:
+                err_printf(&cfg, "Error: Invalid id.\n");
+                break;
+        }
+        goto cleanup;
+    }
+    if (cfg.debug) {
+        mosquitto_log_callback_set(mosq, my_log_callback);
+    }
+    mosquitto_connect_v5_callback_set(mosq, my_connect_callback);
+    mosquitto_disconnect_v5_callback_set(mosq, my_disconnect_callback);
+    mosquitto_publish_v5_callback_set(mosq, my_publish_callback);
 
-	if(!cfg.topic || cfg.pub_mode == MSGMODE_NONE){
-		fprintf(stderr, "Error: Both topic and message must be supplied.\n");
-		print_usage();
-		goto cleanup;
-	}
+    if (client_opts_set(mosq, &cfg)) {
+        goto cleanup;
+    }
 
+    app = gtk_application_new("org.eclipse.mosquitto_pub", G_APPLICATION_FLAGS_NONE);
+    g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
+    status = g_application_run(G_APPLICATION(app), argc, argv);
+    g_object_unref(app);
 
-	if(client_id_generate(&cfg)){
-		goto cleanup;
-	}
+    rc = pub_shared_loop(mosq);
 
-	mosq = mosquitto_new(cfg.id, cfg.clean_session, NULL);
-	if(!mosq){
-		switch(errno){
-			case ENOMEM:
-				err_printf(&cfg, "Error: Out of memory.\n");
-				break;
-			case EINVAL:
-				err_printf(&cfg, "Error: Invalid id.\n");
-				break;
-		}
-		goto cleanup;
-	}
-	if(cfg.debug){
-		mosquitto_log_callback_set(mosq, my_log_callback);
-	}
-	mosquitto_connect_v5_callback_set(mosq, my_connect_callback);
-	mosquitto_disconnect_v5_callback_set(mosq, my_disconnect_callback);
-	mosquitto_publish_v5_callback_set(mosq, my_publish_callback);
+    if (cfg.message && cfg.pub_mode == MSGMODE_FILE) {
+        free(cfg.message);
+        cfg.message = NULL;
+    }
+    mosquitto_destroy(mosq);
+    mosquitto_lib_cleanup();
+    client_config_cleanup(&cfg);
+    pub_shared_cleanup();
 
-	if(client_opts_set(mosq, &cfg)){
-		goto cleanup;
-	}
-
-	rc = client_connect(mosq, &cfg);
-	if(rc){
-		goto cleanup;
-	}
-
-	rc = pub_shared_loop(mosq);
-
-	if(cfg.message && cfg.pub_mode == MSGMODE_FILE){
-		free(cfg.message);
-		cfg.message = NULL;
-	}
-	mosquitto_destroy(mosq);
-	mosquitto_lib_cleanup();
-	client_config_cleanup(&cfg);
-	pub_shared_cleanup();
-
-	if(rc){
-		err_printf(&cfg, "Error: %s\n", mosquitto_strerror(rc));
-	}
-	if(connack_result){
-		return connack_result;
-	}else{
-		return rc;
-	}
+    if (rc) {
+        err_printf(&cfg, "Error: %s\n", mosquitto_strerror(rc));
+    }
+    if (connack_result) {
+        return connack_result;
+    } else {
+        return rc;
+    }
 
 cleanup:
-	mosquitto_lib_cleanup();
-	client_config_cleanup(&cfg);
-	pub_shared_cleanup();
-	return 1;
+    mosquitto_lib_cleanup();
+    client_config_cleanup(&cfg);
+    pub_shared_cleanup();
+    return 1;
 }
+
+
+void on_connect_button_clicked(GtkButton *button, gpointer user_data) {
+    const char *broker = gtk_entry_get_text(GTK_ENTRY(broker_entry));
+    // Imposta il broker nella configurazione
+    cfg.host = strdup(broker);
+    status = STATUS_CONNECTING;
+    mosquitto_reconnect(mosq);
+}
+
+void on_publish_button_clicked(GtkButton *button, gpointer user_data) {
+    const char *topic = gtk_entry_get_text(GTK_ENTRY(topic_entry));
+    const char *message = gtk_entry_get_text(GTK_ENTRY(message_entry));
+    // Pubblica il messaggio
+    my_publish(mosq, &last_mid_sent, topic, strlen(message), (void *)message, cfg.qos, cfg.retain);
+}
+
+void activate(GtkApplication *app, gpointer user_data) {
+    GtkWidget *window;
+    GtkWidget *grid;
+    GtkWidget *connect_button;
+    GtkWidget *publish_button;
+
+    window = gtk_application_window_new(app);
+    gtk_window_set_title(GTK_WINDOW(window), "Mosquitto Pub GUI");
+    gtk_window_set_default_size(GTK_WINDOW(window), 400, 200);
+
+    grid = gtk_grid_new();
+    gtk_container_add(GTK_CONTAINER(window), grid);
+
+    broker_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(broker_entry), "Enter broker address");
+    gtk_grid_attach(GTK_GRID(grid), broker_entry, 0, 0, 2, 1);
+
+    connect_button = gtk_button_new_with_label("Connect");
+    g_signal_connect(connect_button, "clicked", G_CALLBACK(on_connect_button_clicked), NULL);
+    gtk_grid_attach(GTK_GRID(grid), connect_button, 2, 0, 1, 1);
+
+    topic_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(topic_entry), "Enter topic");
+    gtk_grid_attach(GTK_GRID(grid), topic_entry, 0, 1, 3, 1);
+
+    message_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(message_entry), "Enter message");
+    gtk_grid_attach(GTK_GRID(grid), message_entry, 0, 2, 3, 1);
+
+    publish_button = gtk_button_new_with_label("Publish");
+    g_signal_connect(publish_button, "clicked", G_CALLBACK(on_publish_button_clicked), NULL);
+    gtk_grid_attach(GTK_GRID(grid), publish_button, 2, 3, 1, 1);
+
+    gtk_widget_show_all(window);
+}
+

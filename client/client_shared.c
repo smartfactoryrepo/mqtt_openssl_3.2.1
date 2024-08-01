@@ -38,6 +38,13 @@ Contributors:
 #include <mqtt_protocol.h>
 #include "client_shared.h"
 
+#include "sub_client_output.h"
+
+#include "client_shared.h"
+
+// Definizione della variabile globale di stato
+int status = STATUS_DISCONNECTED;
+
 #ifdef WITH_SOCKS
 static int mosquitto__parse_socks_url(struct mosq_config *cfg, char *url);
 #endif

@@ -17,7 +17,7 @@ Contributors:
 */
 
 #include "config.h"
-
+#include <gtk/gtk.h>
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -47,6 +47,19 @@ static bool timed_out = false;
 static int connack_result = 0;
 bool connack_received = false;
 
+static GtkWidget *broker_entry;
+static GtkWidget *topic_entry;
+static GtkWidget *message_view;
+
+#ifndef MOSQ_ERR_TIMEOUT
+#define MOSQ_ERR_TIMEOUT 7  // Assicurati che questo valore non conflitti con altri codici di errore
+#endif
+
+
+#define VERSION "1.0.0"
+
+void activate(GtkApplication *app, gpointer user_data);
+
 #ifndef WIN32
 static void my_signal_handler(int signum)
 {
@@ -74,6 +87,15 @@ static void my_message_callback(struct mosquitto *mosq, void *obj, const struct 
 	UNUSED(properties);
 
 	if(process_messages == false) return;
+	
+	 // Aggiorna la visualizzazione dei messaggi nella GUI
+    	GtkTextBuffer *buffer;
+   	GtkTextIter iter;
+   	buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(message_view));
+   	gtk_text_buffer_get_end_iter(buffer, &iter);
+   	gtk_text_buffer_insert(buffer, &iter, message->payload, -1);
+    	gtk_text_buffer_insert(buffer, &iter, "\n", -1);
+	
 
 	if(cfg.retained_only && !message->retain && process_messages){
 		process_messages = false;
@@ -315,117 +337,177 @@ static void print_usage(void)
 	printf("\nSee https://mosquitto.org/ for more information.\n\n");
 }
 
-int main(int argc, char *argv[])
-{
-	int rc;
-#ifndef WIN32
-		struct sigaction sigact;
-#endif
-
-	mosquitto_lib_init();
-
-	output_init();
-
-	rc = client_config_load(&cfg, CLIENT_SUB, argc, argv);
-	if(rc){
-		if(rc == 2){
-			/* --help */
-			print_usage();
-		}else if(rc == 3){
-			/* --version */
-			print_version();
-		}else{
-			fprintf(stderr, "\nUse 'mosquitto_sub --help' to see usage.\n");
-		}
-		goto cleanup;
-	}
-
-	if(cfg.no_retain && cfg.retained_only){
-		fprintf(stderr, "\nError: Combining '-R' and '--retained-only' makes no sense.\n");
-		goto cleanup;
-	}
-
-	if(client_id_generate(&cfg)){
-		goto cleanup;
-	}
-
-	g_mosq = mosquitto_new(cfg.id, cfg.clean_session, &cfg);
-	if(!g_mosq){
-		switch(errno){
-			case ENOMEM:
-				err_printf(&cfg, "Error: Out of memory.\n");
-				break;
-			case EINVAL:
-				err_printf(&cfg, "Error: Invalid id and/or clean_session.\n");
-				break;
-		}
-		goto cleanup;
-	}
-	if(client_opts_set(g_mosq, &cfg)){
-		goto cleanup;
-	}
-	if(cfg.debug){
-		mosquitto_log_callback_set(g_mosq, my_log_callback);
-	}
-	mosquitto_subscribe_callback_set(g_mosq, my_subscribe_callback);
-	mosquitto_connect_v5_callback_set(g_mosq, my_connect_callback);
-	mosquitto_message_v5_callback_set(g_mosq, my_message_callback);
-
-	rc = client_connect(g_mosq, &cfg);
-	if(rc){
-		goto cleanup;
-	}
+int main(int argc, char *argv[]) {
+    int rc;
+    GtkApplication *app;
+    int status;
 
 #ifndef WIN32
-	sigact.sa_handler = my_signal_handler;
-	sigemptyset(&sigact.sa_mask);
-	sigact.sa_flags = 0;
-
-	if(sigaction(SIGALRM, &sigact, NULL) == -1){
-		perror("sigaction");
-		goto cleanup;
-	}
-
-	if(sigaction(SIGTERM, &sigact, NULL) == -1){
-		perror("sigaction");
-		goto cleanup;
-	}
-
-	if(sigaction(SIGINT, &sigact, NULL) == -1){
-		perror("sigaction");
-		goto cleanup;
-	}
-
-	if(cfg.timeout){
-		alarm(cfg.timeout);
-	}
+    struct sigaction sigact;
 #endif
 
-	rc = mosquitto_loop_forever(g_mosq, -1, 1);
+    mosquitto_lib_init();
 
-	mosquitto_destroy(g_mosq);
-	mosquitto_lib_cleanup();
+    output_init();
 
-	if(cfg.msg_count>0 && rc == MOSQ_ERR_NO_CONN){
-		rc = 0;
-	}
-	client_config_cleanup(&cfg);
-	if(timed_out){
-		err_printf(&cfg, "Timed out\n");
-		return MOSQ_ERR_TIMEOUT;
-	}else if(rc){
-		err_printf(&cfg, "Error: %s\n", mosquitto_strerror(rc));
-	}
-	if(connack_result){
-		return connack_result;
-	}else{
-		return rc;
-	}
+    rc = client_config_load(&cfg, CLIENT_SUB, argc, argv);
+    if(rc){
+        if(rc == 2){
+            /* --help */
+            print_usage();
+        }else if(rc == 3){
+            /* --version */
+            print_version();
+        }else{
+            fprintf(stderr, "\nUse 'mosquitto_sub --help' to see usage.\n");
+        }
+        goto cleanup;
+    }
+
+    if(cfg.no_retain && cfg.retained_only){
+        fprintf(stderr, "\nError: Combining '-R' and '--retained-only' makes no sense.\n");
+        goto cleanup;
+    }
+
+    if(client_id_generate(&cfg)){
+        goto cleanup;
+    }
+
+    g_mosq = mosquitto_new(cfg.id, cfg.clean_session, &cfg);
+    if(!g_mosq){
+        switch(errno){
+            case ENOMEM:
+                err_printf(&cfg, "Error: Out of memory.\n");
+                break;
+            case EINVAL:
+                err_printf(&cfg, "Error: Invalid id and/or clean_session.\n");
+                break;
+        }
+        goto cleanup;
+    }
+    if(client_opts_set(g_mosq, &cfg)){
+        goto cleanup;
+    }
+    if(cfg.debug){
+        mosquitto_log_callback_set(g_mosq, my_log_callback);
+    }
+    mosquitto_subscribe_callback_set(g_mosq, my_subscribe_callback);
+    mosquitto_connect_v5_callback_set(g_mosq, my_connect_callback);
+    mosquitto_message_v5_callback_set(g_mosq, my_message_callback);
+
+    rc = client_connect(g_mosq, &cfg);
+    if(rc){
+        goto cleanup;
+    }
+
+#ifndef WIN32
+    sigact.sa_handler = my_signal_handler;
+    sigemptyset(&sigact.sa_mask);
+    sigact.sa_flags = 0;
+
+    if(sigaction(SIGALRM, &sigact, NULL) == -1){
+        perror("sigaction");
+        goto cleanup;
+    }
+
+    if(sigaction(SIGTERM, &sigact, NULL) == -1){
+        perror("sigaction");
+        goto cleanup;
+    }
+
+    if(sigaction(SIGINT, &sigact, NULL) == -1){
+        perror("sigaction");
+        goto cleanup;
+    }
+
+    if(cfg.timeout){
+        alarm(cfg.timeout);
+    }
+#endif
+
+    // Avvia l'applicazione GTK+
+    app = gtk_application_new("org.eclipse.mosquitto_sub", G_APPLICATION_FLAGS_NONE);
+    g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
+    status = g_application_run(G_APPLICATION(app), argc, argv);
+    g_object_unref(app);
+
+    rc = mosquitto_loop_forever(g_mosq, -1, 1);
+
+    mosquitto_destroy(g_mosq);
+    mosquitto_lib_cleanup();
+
+    if(cfg.msg_count>0 && rc == MOSQ_ERR_NO_CONN){
+        rc = 0;
+    }
+    client_config_cleanup(&cfg);
+    if(timed_out){
+        err_printf(&cfg, "Timed out\n");
+        return MOSQ_ERR_TIMEOUT;
+    }else if(rc){
+        err_printf(&cfg, "Error: %s\n", mosquitto_strerror(rc));
+    }
+    if(connack_result){
+        return connack_result;
+    }else{
+        return rc;
+    }
 
 cleanup:
-	mosquitto_destroy(g_mosq);
-	mosquitto_lib_cleanup();
-	client_config_cleanup(&cfg);
-	return 1;
+    mosquitto_destroy(g_mosq);
+    mosquitto_lib_cleanup();
+    client_config_cleanup(&cfg);
+    return 1;
+}
+
+
+void on_connect_button_clicked(GtkButton *button, gpointer user_data) {
+    const char *broker = gtk_entry_get_text(GTK_ENTRY(broker_entry));
+    // Imposta il broker nella configurazione
+    cfg.host = strdup(broker);
+    status = STATUS_CONNECTING;
+    mosquitto_reconnect(g_mosq);
+}
+
+void on_subscribe_button_clicked(GtkButton *button, gpointer user_data) {
+    const char *topic = gtk_entry_get_text(GTK_ENTRY(topic_entry));
+    // Sottoscrivi al topic
+    mosquitto_subscribe(g_mosq, NULL, topic, cfg.qos);
+}
+
+void activate(GtkApplication *app, gpointer user_data) {
+    GtkWidget *window;
+    GtkWidget *grid;
+    GtkWidget *connect_button;
+    GtkWidget *subscribe_button;
+
+    window = gtk_application_window_new(app);
+    gtk_window_set_title(GTK_WINDOW(window), "Mosquitto Sub GUI");
+    gtk_window_set_default_size(GTK_WINDOW(window), 400, 200);
+
+    grid = gtk_grid_new();
+    gtk_container_add(GTK_CONTAINER(window), grid);
+
+    broker_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(broker_entry), "Enter broker address");
+    gtk_grid_attach(GTK_GRID(grid), broker_entry, 0, 0, 2, 1);
+
+    connect_button = gtk_button_new_with_label("Connect");
+    g_signal_connect(connect_button, "clicked", G_CALLBACK(on_connect_button_clicked), NULL);
+    gtk_grid_attach(GTK_GRID(grid), connect_button, 2, 0, 1, 1);
+
+    topic_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(topic_entry), "Enter topic");
+    gtk_grid_attach(GTK_GRID(grid), topic_entry, 0, 1, 2, 1);
+
+    subscribe_button = gtk_button_new_with_label("Subscribe");
+    g_signal_connect(subscribe_button, "clicked", G_CALLBACK(on_subscribe_button_clicked), NULL);
+    gtk_grid_attach(GTK_GRID(grid), subscribe_button, 2, 1, 1, 1);
+
+    message_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(message_view), FALSE);
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(message_view), FALSE);
+    gtk_grid_attach(GTK_GRID(grid), message_view, 0, 2, 3, 1);
+
+    gtk_widget_show_all(window);
 }
 
