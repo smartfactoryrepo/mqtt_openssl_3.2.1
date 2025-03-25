@@ -55,6 +55,8 @@ Contributors:
 // Variabile globale di stato
 extern int status;
 
+extern struct mosq_config cfg;
+
 #ifndef MOSQ_OPT_TCP_NODELAY
 #define MOSQ_OPT_TCP_NODELAY 4  // Definizione dell'opzione TCP_NODELAY
 #endif

@@ -17,7 +17,7 @@ Contributors:
 */
 #define VERSION "1.0.0"
 #include "config.h"
-
+//#include"pub_client.c"
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
@@ -55,6 +55,7 @@ int msg_count = 0;
 struct mosquitto *g_mosq = NULL;
 static bool timed_out = false;
 static int connack_result = 0;
+extern struct mosq_config cfg;
 
 #ifndef WIN32
 static void my_signal_handler(int signum)

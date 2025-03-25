@@ -45,6 +45,9 @@ Contributors:
 // Definizione della variabile globale di stato
 int status = STATUS_DISCONNECTED;
 
+
+struct mosq_config cfg;
+
 #ifdef WITH_SOCKS
 static int mosquitto__parse_socks_url(struct mosq_config *cfg, char *url);
 #endif

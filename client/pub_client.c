@@ -54,7 +54,7 @@ static int connack_result = 0;
 
 
 //new
-struct mosq_config cfg;
+extern struct mosq_config cfg;
 bool process_messages = true;
 int msg_count = 0;
 struct mosquitto *mosq = NULL;  // Dichiarazione della variabile globale

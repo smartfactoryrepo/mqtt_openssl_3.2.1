@@ -14,6 +14,11 @@ ALL_DEPS:= static_pub static_sub static_rr
 endif
 endif
 
+CLIENT_CFLAGS += $(shell pkg-config --cflags gtk+-3.0)
+CLIENT_LDADD += $(shell pkg-config --libs gtk+-3.0)
+
+
+
 all : ${ALL_DEPS}
 
 static : static_pub static_sub static_rr

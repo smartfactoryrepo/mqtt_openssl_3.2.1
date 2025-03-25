@@ -38,7 +38,7 @@ Contributors:
 #include "client_shared.h"
 #include "sub_client_output.h"
 
-struct mosq_config cfg;
+extern struct mosq_config cfg;
 bool process_messages = true;
 int msg_count = 0;
 struct mosquitto *g_mosq = NULL;
